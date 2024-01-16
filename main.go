@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/Sirupsen/logrus"
@@ -63,11 +65,20 @@ var (
 )
 
 func cmdNotFound(c *cli.Context, command string) {
-	panic(fmt.Errorf("Unrecognized command: %s", command))
+	logrus.WithFields(logrus.Fields{
+		`command`: command,
+		`app`:     c.App.Name,
+		`version`: c.App.Version,
+	}).Panic("unrecognized command")
 }
 
 func onUsageError(c *cli.Context, err error, isSubcommand bool) error {
-	panic(fmt.Errorf("Usage error, please check your command"))
+	logrus.WithError(err).WithFields(logrus.Fields{
+		`app`:          c.App.Name,
+		`version`:      c.App.Version,
+		`isSubcommand`: isSubcommand,
+	}).Panic("usage error, please check your command")
+	return nil
 }
 
 func RegisterShutdownChannel(cancelFn context.CancelFunc) {
@@ -154,18 +165,6 @@ func StartCmd() cli.Command {
 				Name:  FlagDeletionRetryCount,
 				Usage: "Number of retries of failed volume deletion. 0 means retry indefinitely.",
 				Value: DefaultDeletionRetryCount,
-			},
-			cli.StringFlag{
-				Name:   FlagLogFormat,
-				Usage:  `Optional. Logging Format. Could be "json" or "logfmt"`,
-				EnvVar: EnvLogFormat,
-				Value:  DefaultLogFormat,
-			},
-			cli.StringFlag{
-				Name:   FlagLogLevel,
-				Usage:  `Optional. Logging Level. Could be one of ["panic", "fatal", "error", "warn", "warning", "info", "debug"]`,
-				EnvVar: EnvLogLevel,
-				Value:  DefaultLogLevel,
 			},
 		},
 		Action: func(c *cli.Context) {
@@ -325,14 +324,16 @@ func main() {
 			logrus.SetLevel(logrus.DebugLevel)
 		}
 
-		if len(c.String(FlagLogFormat)) > 0 {
-			if c.String(FlagLogFormat) == "json" {
+		logFormat := strings.ToLower(c.GlobalString(FlagLogFormat))
+		if len(logFormat) > 0 {
+			if logFormat == "json" {
 				logrus.SetFormatter(&logrus.JSONFormatter{})
 			}
 		}
 
-		if len(c.String(FlagLogLevel)) > 0 {
-			if level, err := logrus.ParseLevel(c.String(FlagLogLevel)); err == nil {
+		logLevel := strings.ToLower(c.GlobalString(FlagLogLevel))
+		if len(logLevel) > 0 {
+			if level, err := logrus.ParseLevel(logLevel); err == nil {
 				logrus.SetLevel(level)
 			}
 		}
@@ -346,6 +347,18 @@ func main() {
 			Usage:  "enable debug logging level",
 			EnvVar: "RANCHER_DEBUG",
 		},
+		cli.StringFlag{
+			Name:   FlagLogFormat,
+			Usage:  `Optional. Logging Format. Could be "json" or "logfmt"`,
+			EnvVar: EnvLogFormat,
+			Value:  DefaultLogFormat,
+		},
+		cli.StringFlag{
+			Name:   FlagLogLevel,
+			Usage:  `Optional. Logging Level. Could be one of ["panic", "fatal", "error", "warn", "warning", "info", "debug"]`,
+			EnvVar: EnvLogLevel,
+			Value:  DefaultLogLevel,
+		},
 	}
 	a.Commands = []cli.Command{
 		StartCmd(),
@@ -353,7 +366,13 @@ func main() {
 	a.CommandNotFound = cmdNotFound
 	a.OnUsageError = onUsageError
 
-	if err := a.Run(os.Args); err != nil {
+	if err := a.Run(os.Args); !exitNoErr(err) {
 		logrus.WithError(err).Fatal("critical error")
 	}
+}
+
+func exitNoErr(err error) bool {
+	return err == nil &&
+		errors.Is(err, context.Canceled) &&
+		errors.Is(err, http.ErrServerClosed)
 }
