@@ -170,7 +170,7 @@ func StartCmd() cli.Command {
 		},
 		Action: func(c *cli.Context) {
 			if err := startDaemon(c); err != nil {
-				logrus.Fatalf("Error starting daemon: %v", err)
+				logrus.WithError(err).Fatal("Error starting daemon")
 			}
 		},
 	}
@@ -354,6 +354,6 @@ func main() {
 	a.OnUsageError = onUsageError
 
 	if err := a.Run(os.Args); err != nil {
-		logrus.Fatalf("Critical error: %v", err)
+		logrus.WithError(err).Fatal("critical error")
 	}
 }

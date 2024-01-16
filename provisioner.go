@@ -165,7 +165,9 @@ func (p *LocalPathProvisioner) refreshConfig() error {
 	if err != nil {
 		return err
 	}
-	logrus.Debugf("Applied config: %v", string(output))
+	logrus.WithFields(logrus.Fields{
+		`config`: string(output),
+	}).Debug("applied config")
 
 	return err
 }
@@ -178,10 +180,12 @@ func (p *LocalPathProvisioner) watchAndRefreshConfig() {
 			select {
 			case <-ticker.C:
 				if err := p.refreshConfig(); err != nil {
-					logrus.Errorf("failed to load the new config file: %v", err)
+					logrus.WithError(err).WithFields(logrus.Fields{
+						`file`: p.configFile,
+					}).Error("failed to load the new config file")
 				}
 			case <-p.ctx.Done():
-				logrus.Infof("stop watching config file")
+				logrus.Info("stop watching config file")
 				return
 			}
 		}
@@ -212,7 +216,9 @@ func (p *LocalPathProvisioner) getPathOnNode(node string, requestedPath string) 
 		if npMap == nil {
 			return "", fmt.Errorf("config doesn't contain node %v, and no %v available", node, NodeDefaultNonListedNodes)
 		}
-		logrus.Debugf("config doesn't contain node %v, use %v instead", node, NodeDefaultNonListedNodes)
+		logrus.WithFields(logrus.Fields{
+			`node`: node,
+		}).Debugf("config doesn't contain the node, use %v instead", NodeDefaultNonListedNodes)
 	}
 	paths := npMap.Paths
 	if len(paths) == 0 {
@@ -299,11 +305,11 @@ func (p *LocalPathProvisioner) Provision(ctx context.Context, opts pvController.
 	folderName := strings.Join([]string{name, opts.PVC.Namespace, opts.PVC.Name}, "_")
 
 	path := filepath.Join(basePath, folderName)
-	if nodeName == "" {
-		logrus.Infof("Creating volume %v at %v", name, path)
-	} else {
-		logrus.Infof("Creating volume %v at %v:%v", name, nodeName, path)
-	}
+	logrus.WithFields(logrus.Fields{
+		`volume`: name,
+		`path`:   path,
+		`node`:   nodeName,
+	}).Info("creating volume")
 
 	storage := pvc.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
 	provisionCmd := make([]string, 0, 2)
@@ -394,11 +400,11 @@ func (p *LocalPathProvisioner) Delete(ctx context.Context, pv *v1.PersistentVolu
 		return err
 	}
 	if pv.Spec.PersistentVolumeReclaimPolicy != v1.PersistentVolumeReclaimRetain {
-		if node == "" {
-			logrus.Infof("Deleting volume %v at %v", pv.Name, path)
-		} else {
-			logrus.Infof("Deleting volume %v at %v:%v", pv.Name, node, path)
-		}
+		logrus.WithFields(logrus.Fields{
+			`volume`: pv.Name,
+			`path`:   path,
+			`node`:   node,
+		}).Info("deleting volume")
 		storage := pv.Spec.Capacity[v1.ResourceName(v1.ResourceStorage)]
 		cleanupCmd := make([]string, 0, 2)
 		if p.config.TeardownCommand == "" {
@@ -413,12 +419,16 @@ func (p *LocalPathProvisioner) Delete(ctx context.Context, pv *v1.PersistentVolu
 			SizeInBytes: storage.Value(),
 			Node:        node,
 		}); err != nil {
-			logrus.Infof("clean up volume %v failed: %v", pv.Name, err)
+			logrus.WithError(err).WithFields(logrus.Fields{
+				`volume`: pv.Name,
+			}).Info("clean up volume failed")
 			return err
 		}
 		return nil
 	}
-	logrus.Infof("Retained volume %v", pv.Name)
+	logrus.WithFields(logrus.Fields{
+		`volume`: pv.Name,
+	}).Info("retained volume")
 	return nil
 }
 
@@ -593,7 +603,10 @@ func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, 
 
 	// If it already exists due to some previous errors, the pod will be cleaned up later automatically
 	// https://github.com/rancher/local-path-provisioner/issues/27
-	logrus.Infof("create the helper pod %s into %s", helperPod.Name, p.namespace)
+	logrus.WithFields(logrus.Fields{
+		`pod`:       helperPod.Name,
+		`namespace`: p.namespace,
+	}).Info("create the helper pod")
 	pod, err := p.kubeClient.CoreV1().Pods(p.namespace).Create(context.TODO(), helperPod, metav1.CreateOptions{})
 	if err != nil && !k8serror.IsAlreadyExists(err) {
 		return err
@@ -602,11 +615,17 @@ func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, 
 	defer func() {
 		// log helper pod logs to the controller
 		if err := saveHelperPodLogs(pod); err != nil {
-			logrus.Error(err.Error())
+			logrus.WithError(err).WithFields(logrus.Fields{
+				`pod`:       helperPod.Name,
+				`namespace`: p.namespace,
+			}).Error(`error when saving helper pod logs`)
 		}
 		e := p.kubeClient.CoreV1().Pods(p.namespace).Delete(context.TODO(), helperPod.Name, metav1.DeleteOptions{})
 		if e != nil {
-			logrus.Errorf("unable to delete the helper pod: %v", e)
+			logrus.WithError(e).WithFields(logrus.Fields{
+				`pod`:       helperPod.Name,
+				`namespace`: p.namespace,
+			}).Error("unable to delete the helper pod")
 		}
 	}()
 
@@ -624,11 +643,13 @@ func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, 
 		return fmt.Errorf("create process timeout after %v seconds", p.config.CmdTimeoutSeconds)
 	}
 
-	if o.Node == "" {
-		logrus.Infof("Volume %v has been %vd on %v", o.Name, action, o.Path)
-	} else {
-		logrus.Infof("Volume %v has been %vd on %v:%v", o.Name, action, o.Node, o.Path)
-	}
+	logrus.WithFields(logrus.Fields{
+		`node`:   o.Node,
+		`volume`: o.Name,
+		`action`: action,
+		`path`:   o.Path,
+	}).Info("volume action is successful")
+
 	return nil
 }
 
@@ -782,7 +803,9 @@ func saveHelperPodLogs(pod *v1.Pod) (err error) {
 	podLogs.Close()
 
 	// log all messages from the helper pod to the controller
-	logrus.Infof("Start of %s logs", pod.Name)
+	logrus.WithFields(logrus.Fields{
+		`pod`: pod.Name,
+	}).Info("start of logs")
 	bufferStr := buf.String()
 	if len(bufferStr) > 0 {
 		helperPodLogs := strings.Split(strings.Trim(bufferStr, "\n"), "\n")
@@ -790,6 +813,8 @@ func saveHelperPodLogs(pod *v1.Pod) (err error) {
 			logrus.Info(log)
 		}
 	}
-	logrus.Infof("End of %s logs", pod.Name)
+	logrus.WithFields(logrus.Fields{
+		`pod`: pod.Name,
+	}).Info("end of logs")
 	return nil
 }
