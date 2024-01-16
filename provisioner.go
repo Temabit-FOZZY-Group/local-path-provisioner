@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	k8sTypes "k8s.io/apimachinery/pkg/types"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -102,7 +103,7 @@ type Config struct {
 }
 
 func NewProvisioner(ctx context.Context, kubeClient *clientset.Clientset,
-	configFile, namespace, helperImage, configMapName, serviceAccountName, helperPodYaml string) (*LocalPathProvisioner, error) {
+	configFile, namespace, helperImage, configMapName, serviceAccountName, helperPodYaml string, podUID string, podName string) (*LocalPathProvisioner, error) {
 	p := &LocalPathProvisioner{
 		ctx: ctx,
 
@@ -123,6 +124,16 @@ func NewProvisioner(ctx context.Context, kubeClient *clientset.Clientset,
 	if err != nil {
 		return nil, err
 	}
+
+	if len(podUID) > 0 && len(podName) > 0 {
+		p.helperPod.OwnerReferences = append(p.helperPod.OwnerReferences, metav1.OwnerReference{
+			APIVersion: "v1",
+			Kind:       "Pod",
+			UID:        k8sTypes.UID(podUID),
+			Name:       podName,
+		})
+	}
+
 	if err := p.refreshConfig(); err != nil {
 		return nil, err
 	}
@@ -573,10 +584,12 @@ func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, 
 	helperPod.Spec.Volumes = append(helperPod.Spec.Volumes, lpvVolumes...)
 	helperPod.Spec.Containers[0].Command = cmd
 	helperPod.Spec.Containers[0].Env = append(helperPod.Spec.Containers[0].Env, env...)
-	helperPod.Spec.Containers[0].Args = []string{"-p", filepath.Join(parentDir, volumeDir),
+	helperPod.Spec.Containers[0].Args = []string{
+		"-p", filepath.Join(parentDir, volumeDir),
 		"-s", strconv.FormatInt(o.SizeInBytes, 10),
 		"-m", string(o.Mode),
-		"-a", string(action)}
+		"-a", string(action),
+	}
 
 	// If it already exists due to some previous errors, the pod will be cleaned up later automatically
 	// https://github.com/rancher/local-path-provisioner/issues/27

@@ -30,6 +30,12 @@ var (
 	FlagNamespace                 = "namespace"
 	EnvNamespace                  = "POD_NAMESPACE"
 	DefaultNamespace              = "local-path-storage"
+	FlagPodUID                    = "pod-uid"
+	EnvPodUID                     = "POD_UID"
+	DefaultPodUID                 = ""
+	FlagPodName                   = "pod-name"
+	EnvPodName                    = "POD_NAME"
+	DefaultPodName                = ""
 	FlagHelperImage               = "helper-image"
 	EnvHelperImage                = "HELPER_IMAGE"
 	DefaultHelperImage            = "rancher/library-busybox:1.32.1"
@@ -94,6 +100,18 @@ func StartCmd() cli.Command {
 				Usage:  "Required. The namespace that Provisioner is running in",
 				EnvVar: EnvNamespace,
 				Value:  DefaultNamespace,
+			},
+			cli.StringFlag{
+				Name:   FlagPodUID,
+				Usage:  "Optional. The Pod UID that Provisioner is running with",
+				EnvVar: EnvPodUID,
+				Value:  DefaultPodUID,
+			},
+			cli.StringFlag{
+				Name:   FlagPodName,
+				Usage:  "Optional. The Pod name that Provisioner is running in",
+				EnvVar: EnvPodName,
+				Value:  DefaultPodName,
 			},
 			cli.StringFlag{
 				Name:   FlagHelperImage,
@@ -274,7 +292,9 @@ func startDaemon(c *cli.Context) error {
 		return fmt.Errorf("invalid zero or negative integer flag %v", FlagWorkerThreads)
 	}
 
-	provisioner, err := NewProvisioner(ctx, kubeClient, configFile, namespace, helperImage, configMapName, serviceAccountName, helperPodYaml)
+	podUID := c.String(FlagPodUID)
+	podName := c.String(FlagPodName)
+	provisioner, err := NewProvisioner(ctx, kubeClient, configFile, namespace, helperImage, configMapName, serviceAccountName, helperPodYaml, podUID, podName)
 	if err != nil {
 		return err
 	}
