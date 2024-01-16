@@ -48,6 +48,12 @@ var (
 	DefaultProvisioningRetryCount = pvController.DefaultFailedProvisionThreshold
 	FlagDeletionRetryCount        = "deletion-retry-count"
 	DefaultDeletionRetryCount     = pvController.DefaultFailedDeleteThreshold
+	FlagLogFormat                 = "log-format"
+	EnvLogFormat                  = "LOG_FORMAT"
+	DefaultLogFormat              = "logfmt"
+	FlagLogLevel                  = "log-level"
+	EnvLogLevel                   = "LOG_LEVEL"
+	DefaultLogLevel               = "info"
 )
 
 func cmdNotFound(c *cli.Context, command string) {
@@ -130,6 +136,18 @@ func StartCmd() cli.Command {
 				Name:  FlagDeletionRetryCount,
 				Usage: "Number of retries of failed volume deletion. 0 means retry indefinitely.",
 				Value: DefaultDeletionRetryCount,
+			},
+			cli.StringFlag{
+				Name:   FlagLogFormat,
+				Usage:  `Optional. Logging Format. Could be "json" or "logfmt"`,
+				EnvVar: EnvLogFormat,
+				Value:  DefaultLogFormat,
+			},
+			cli.StringFlag{
+				Name:   FlagLogLevel,
+				Usage:  `Optional. Logging Level. Could be one of ["panic", "fatal", "error", "warn", "warning", "info", "debug"]`,
+				EnvVar: EnvLogLevel,
+				Value:  DefaultLogLevel,
 			},
 		},
 		Action: func(c *cli.Context) {
@@ -286,6 +304,19 @@ func main() {
 		if c.GlobalBool("debug") {
 			logrus.SetLevel(logrus.DebugLevel)
 		}
+
+		if len(c.String(FlagLogFormat)) > 0 {
+			if c.String(FlagLogFormat) == "json" {
+				logrus.SetFormatter(&logrus.JSONFormatter{})
+			}
+		}
+
+		if len(c.String(FlagLogLevel)) > 0 {
+			if level, err := logrus.ParseLevel(c.String(FlagLogLevel)); err == nil {
+				logrus.SetLevel(level)
+			}
+		}
+
 		return nil
 	}
 
